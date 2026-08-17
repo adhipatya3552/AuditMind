@@ -40,7 +40,6 @@ function severityBadge(severity: Severity) {
 }
 
 export function RiskCard3D({ finding, index, isSelected, onSelect }: Props) {
-  const [open, setOpen] = useState(false);
   const [activeTab, setActiveTab] = useState<"clause" | "impact" | "counter">(
     "impact"
   );
@@ -51,7 +50,7 @@ export function RiskCard3D({ finding, index, isSelected, onSelect }: Props) {
   });
 
   const b = severityBadge(finding.severity);
-  const isOpen = open || isSelected;
+  const isOpen = isSelected;
 
   return (
     <div
@@ -69,10 +68,7 @@ export function RiskCard3D({ finding, index, isSelected, onSelect }: Props) {
       }`}
     >
       <button
-        onClick={() => {
-          setOpen((o) => !o);
-          if (onSelect) onSelect();
-        }}
+        onClick={onSelect}
         className="flex w-full items-start gap-4 p-5 text-left focus:outline-none"
       >
         <div
