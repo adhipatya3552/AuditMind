@@ -56,7 +56,9 @@ export const auditResponseSchema = {
     },
     keyRisks: {
       type: "array",
-      description: "The most important risk findings, ordered most severe first.",
+      description:
+        "The most important risk findings, ordered most severe first. Return no more than 8 findings — only genuine, material risks.",
+      maxItems: 8,
       items: {
         type: "object",
         properties: {

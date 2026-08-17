@@ -49,7 +49,7 @@ Set the same `GEMINI_API_KEY` as an environment variable in Vercel and deploy â€
 
 ## Demo & shell
 
-- Live demo (if deployed): `Vercel_URL`
+- Live demo: https://auditmind.vercel.app
 - Demo mode: Home page â†’ **Try a sample contract** (offline-safe)
 - Application-gateway smoke test: `curl -X POST https://<app>/api/analyze -H "Content-Type: application/json" -d '{"pdfBase64":"<base64>"}'`
 

@@ -24,6 +24,22 @@ import { RiskCard3D } from "@/components/RiskCard3D";
 
 type Phase = "idle" | "reading" | "extracting" | "translating" | "negotiating" | "done" | "error";
 
+/**
+ * Convert a Uint8Array to a base64 string in chunks.
+ *
+ * Calling `btoa(String.fromCharCode(...buf))` on a multi-MB buffer spreads every
+ * byte as an individual argument to fromCharCode and can throw
+ * "Maximum call stack size exceeded". Chunking avoids that entirely.
+ */
+function fileToBase64(bytes: Uint8Array): string {
+  let binary = "";
+  const CHUNK = 0x8000; // 32 KB per pass — safe on every engine
+  for (let i = 0; i < bytes.length; i += CHUNK) {
+    binary += String.fromCharCode(...bytes.subarray(i, i + CHUNK));
+  }
+  return btoa(binary);
+}
+
 /** Strip markdown emphasis/heading artifacts so email text copies clean. */
 function cleanEmailText(text: string): string {
   return text
@@ -82,7 +98,7 @@ export default function Home() {
         return;
       }
       const buf = await file.arrayBuffer();
-      const b64 = btoa(String.fromCharCode(...new Uint8Array(buf)));
+      const b64 = fileToBase64(new Uint8Array(buf));
       runAgentPhases(file.name);
 
       try {
@@ -379,15 +395,27 @@ export default function Home() {
 
                 {/* Right: Detailed Risk Finding Cards */}
                 <div className="space-y-4 lg:col-span-7">
-                  {filteredRisks.map((finding, idx) => (
-                    <RiskCard3D
-                      key={idx}
-                      finding={finding}
-                      index={idx}
-                      isSelected={selectedRiskIdx === idx}
-                      onSelect={() => setSelectedRiskIdx(idx)}
-                    />
-                  ))}
+                  {filteredRisks.length > 0 ? (
+                    filteredRisks.map((finding, idx) => (
+                      <RiskCard3D
+                        key={idx}
+                        finding={finding}
+                        index={idx}
+                        isSelected={selectedRiskIdx === idx}
+                        onSelect={() => setSelectedRiskIdx(idx)}
+                      />
+                    ))
+                  ) : (
+                    <div className="flex flex-col items-center justify-center rounded-2xl border border-slate-800 bg-[#0d1222] p-8 text-center">
+                      <ShieldCheck size={28} className="text-slate-600" />
+                      <p className="mt-3 text-sm font-semibold text-slate-300">
+                        No {severityFilter} risks in this contract
+                      </p>
+                      <p className="mt-1 text-xs text-slate-500">
+                        Try a different severity filter to see more findings.
+                      </p>
+                    </div>
+                  )}
                 </div>
               </div>
             </section>

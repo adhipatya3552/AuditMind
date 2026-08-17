@@ -3,8 +3,47 @@ import { GoogleGenAI } from "@google/genai";
 import { auditResponseSchema, type AuditResult } from "@/types";
 
 // Next.js route segment config: this endpoint runs on the server.
+// Hobby plan allows up to 300s of function time — plenty for a Gemini call
+// on a multi-MB PDF. We set the ceiling so large uploads never get cut off.
 export const runtime = "nodejs";
-export const maxDuration = 60;
+export const maxDuration = 300;
+
+/**
+ * Agent execution log — an append-only audit trail of every analysis run.
+ *
+ * Records the model used, latency, finding count and risk score so we can
+ * demonstrate (and show judges) that the AI pipeline is live in production.
+ * Persisted to /tmp/audit-log.jsonl when the runtime has writable storage
+ * (local dev / some serverless runtimes); otherwise kept in-memory for the
+ * life of the process. No PII is stored — the PDF is never written to disk.
+ */
+
+interface AuditEntry {
+  timestamp: string; // ISO-8601 UTC
+  fileName: string;
+  model: string;
+  latencyMs: number;
+  findingCount: number;
+  overallRiskScore: number;
+  ok: boolean;
+}
+
+const auditEntries: AuditEntry[] = [];
+
+async function logExecution(entry: Omit<AuditEntry, "timestamp">) {
+  const full: AuditEntry = { ...entry, timestamp: new Date().toISOString() };
+  auditEntries.push(full);
+  // Cap the in-memory log to keep the function lightweight.
+  if (auditEntries.length > 2000) auditEntries.shift();
+  // Best-effort JSONL write — never throw on storage failure.
+  try {
+    const fs = await import("node:fs/promises");
+    const path = "/tmp/audit-log.jsonl";
+    fs.appendFile(path, JSON.stringify(full) + "\n").catch(() => {});
+  } catch {
+    /* storage unavailable — in-memory log still holds the entry */
+  }
+}
 
 const MAX_FILE_BYTES = 10 * 1024 * 1024; // 10 MB
 
@@ -38,7 +77,22 @@ function jsonResponse(data: unknown, status = 200) {
   return NextResponse.json(data, { status });
 }
 
+/**
+ * GET /api/analyze — returns the recent agent execution log.
+ * This doubles as the XPRIZE "agent execution logs / API usage records"
+ * evidence surface: every analysis run is timestamped and visible here.
+ */
+export async function GET() {
+  const recent = auditEntries.slice(-50).reverse(); // newest first
+  return jsonResponse({
+    ok: true,
+    count: auditEntries.length,
+    runs: recent,
+  });
+}
+
 export async function POST(request: NextRequest) {
+  const startedAt = Date.now();
   const body = await request.json().catch(() => null);
 
   const fileName: string = body?.fileName ?? "contract.pdf";
@@ -109,12 +163,32 @@ export async function POST(request: NextRequest) {
         throw new Error(`Malformed JSON from model ${model}.`);
       }
 
+      // Record the successful execution in the agent log.
+      await logExecution({
+        fileName,
+        model,
+        latencyMs: Date.now() - startedAt,
+        findingCount: parsed.keyRisks.length,
+        overallRiskScore: parsed.overallRiskScore,
+        ok: true,
+      });
+
       return jsonResponse({ ok: true, result: parsed, model });
     } catch (err) {
       lastError = err;
       console.error(`[auditmind] model ${model} failed:`, err);
     }
   }
+
+  // Record the failed execution (all models exhausted).
+  await logExecution({
+    fileName,
+    model: MODEL_FALLBACKS.join("+"),
+    latencyMs: Date.now() - startedAt,
+    findingCount: 0,
+    overallRiskScore: -1,
+    ok: false,
+  });
 
   return jsonResponse(
     {
