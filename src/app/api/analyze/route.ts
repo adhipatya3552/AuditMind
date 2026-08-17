@@ -64,16 +64,17 @@ Rules:
 - Analyze the contract strictly from the business owner's point of view.
 - Quote the actual clause text — never invent or paraphrase language that is not present.
 - Report only genuine risks that are supported by the document. Do not fabricate clauses.
-- overallRiskScore is 0-100. overallRiskLabel: 0-24 LOW, 25-49 MEDIUM, 50-74 HIGH, 75-100 CRITICAL.
+- Order keyRisks strictly by severity: HIGH first, then MEDIUM, then LOW.
+- overallRiskScore is a 0-100 integer computed as: (HIGH count * 20) + (MEDIUM count * 8) + (LOW count * 3), capped at 100.
+- overallRiskLabel must be derived strictly from overallRiskScore: 0-24 LOW, 25-49 MEDIUM, 50-74 HIGH, 75-100 CRITICAL.
 - The negotiation email must be professional, respectful, and reference the specific clauses to change.
 - Add a short informational disclaimer that this is not legal advice.
 - Return ONLY valid JSON that matches the provided schema.
 
-Severity calibration (use these concrete thresholds when assigning severity):
-- HIGH: Aggressive auto-renewal windows (60 days or more), low aggregate liability caps (at or below 3–6 months of fees), unilateral price increases without penalty-free termination, broad immediate service suspension rights, one-sided termination rights for the other party, or non-compete/non-solicit restrictions that are broad.
-- MEDIUM: Notice windows of 30 days, ambiguous data export or data deletion clauses, standard indemnification splits that shift meaningful risk, missing notice-and-cure periods, or unilateral data/privacy usage rights.
-- LOW: Minor administrative terms, standard governing-law or jurisdiction clauses, boilerplate force-majeure, or cosmetic wording that carries no real financial risk.
-- Only escalate to HIGH when the exposure is genuinely deal-threatening or high-cost. If in doubt, prefer MEDIUM over HIGH, and LOW over MEDIUM, so the report is credible and not alarmist.`;
+Severity classification rules (be completely objective and consistent):
+- HIGH: Auto-renewal notice windows >= 60 days, aggregate liability caps <= 6 months of contract fees, unilateral price increases without penalty-free termination, broad immediate service suspension rights without notice/cure period, or one-sided termination rights.
+- MEDIUM: Auto-renewal notice windows of 30-59 days, aggregate liability caps equal to 7-12 months of fees, ambiguous data retention/deletion clauses upon termination, standard indemnification obligations, or missing notice-and-cure periods (under 14 days).
+- LOW: Standard governing law/jurisdiction, administrative notice procedures, standard non-disclosure, or minor boilerplate formatting that carries no direct financial liability.`;
 
 function jsonResponse(data: unknown, status = 200) {
   return NextResponse.json(data, { status });
@@ -144,7 +145,8 @@ export async function POST(request: NextRequest) {
         contents,
         config: {
           systemInstruction: SYSTEM_PROMPT,
-          temperature: 0.2,
+          temperature: 0.0,
+          seed: 42,
           responseMimeType: "application/json",
           responseSchema: auditResponseSchema,
         },
@@ -163,6 +165,27 @@ export async function POST(request: NextRequest) {
       ) {
         throw new Error(`Malformed JSON from model ${model}.`);
       }
+
+      // Server-side deterministic normalization: sort risks & calculate mathematical score
+      const severityWeight: Record<string, number> = { HIGH: 20, MEDIUM: 8, LOW: 3 };
+      const severityOrder: Record<string, number> = { HIGH: 3, MEDIUM: 2, LOW: 1 };
+
+      // Sort findings by severity (HIGH -> MEDIUM -> LOW)
+      parsed.keyRisks.sort(
+        (a, b) => (severityOrder[b.severity] || 0) - (severityOrder[a.severity] || 0)
+      );
+
+      // Recalculate mathematical score deterministically to guarantee score-to-finding consistency
+      let calculatedScore = 0;
+      for (const risk of parsed.keyRisks) {
+        calculatedScore += severityWeight[risk.severity] || 5;
+      }
+      parsed.overallRiskScore = Math.min(100, Math.max(0, calculatedScore));
+
+      if (parsed.overallRiskScore >= 75) parsed.overallRiskLabel = "CRITICAL";
+      else if (parsed.overallRiskScore >= 50) parsed.overallRiskLabel = "HIGH";
+      else if (parsed.overallRiskScore >= 25) parsed.overallRiskLabel = "MEDIUM";
+      else parsed.overallRiskLabel = "LOW";
 
       // Record the successful execution in the agent log.
       await logExecution({
