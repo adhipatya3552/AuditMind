@@ -3,10 +3,12 @@ import { GoogleGenAI } from "@google/genai";
 import { auditResponseSchema, type AuditResult } from "@/types";
 
 // Next.js route segment config: this endpoint runs on the server.
-// Hobby plan allows up to 300s of function time — plenty for a Gemini call
-// on a multi-MB PDF. We set the ceiling so large uploads never get cut off.
+// Vercel Hobby (free) plan caps function execution at 60 s. Gemini 2.5 Flash
+// typically responds within 10-30 s for contracts under 5 MB — well within
+// the ceiling. Larger / denser PDFs may occasionally approach the limit.
+// On a Pro plan, increase maxDuration to 300 for headroom.
 export const runtime = "nodejs";
-export const maxDuration = 300;
+export const maxDuration = 60;
 
 /**
  * Agent execution log — an append-only audit trail of every analysis run.
@@ -135,7 +137,6 @@ export async function POST(request: NextRequest) {
     },
   ];
 
-  let lastError: unknown = null;
   for (const model of MODEL_FALLBACKS) {
     try {
       const response = await ai.models.generateContent({
@@ -175,7 +176,6 @@ export async function POST(request: NextRequest) {
 
       return jsonResponse({ ok: true, result: parsed, model });
     } catch (err) {
-      lastError = err;
       console.error(`[auditmind] model ${model} failed:`, err);
     }
   }

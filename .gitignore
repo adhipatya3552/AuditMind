@@ -31,6 +31,10 @@ env/
 .claude/
 .gemini/
 
+# Claude Code session artifacts
+claude-code-chat-context.md
+image.png
+
 # Generated Files & Artifacts
 sample-contract.pdf
 
